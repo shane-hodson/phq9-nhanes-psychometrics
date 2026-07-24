@@ -6,9 +6,11 @@
 #   - reconstruct the complete-PHQ-9 analytic sample with SEQN retained
 #   - create the locked 50:50 development and validation split
 #   - validate both split samples
-#   - save the recoverable split object
+#   - estimate the development-sample polychoric correlation matrix
+#   - validate the polychoric matrix and ordinal thresholds
+#   - save the recoverable split and polychoric-analysis objects
 #
-# No polychoric analysis, parallel analysis, EFA or CFA is run in this block.
+# Parallel analysis, EFA and CFA are not yet run in this script.
 # ==============================================================================
 
 # 1. Install any missing packages ----------------------------------------------
@@ -18,7 +20,8 @@ required_packages <- c(
   "tidyr",
   "readr",
   "here",
-  "tibble"
+  "tibble",
+  "psych"
 )
 
 missing_packages <- required_packages[
@@ -37,6 +40,7 @@ library(tidyr)
 library(readr)
 library(here)
 library(tibble)
+library(psych)
 
 # 3. Define locked Stage 3 constants -------------------------------------------
 
@@ -311,35 +315,193 @@ item_floor_summary <- item_category_frequencies |>
     match(variable, phq9_items)
   )
 
-# 10. Define the validated Stage 3 split object --------------------------------
+# 10. Prepare development-sample item data -------------------------------------
+
+development_items <- phq9_stage3_split |>
+  filter(stage3_sample == "development") |>
+  select(all_of(phq9_items)) |>
+  as.data.frame()
+
+# 11. Estimate the development polychoric correlation matrix -------------------
+
+polychoric_warnings <- character()
+
+development_poly <- withCallingHandlers(
+  psych::polychoric(
+    development_items,
+    correct = 0.5,
+    smooth = FALSE,
+    global = TRUE,
+    progress = FALSE
+  ),
+  warning = function(warning_condition) {
+    polychoric_warnings <<- c(
+      polychoric_warnings,
+      conditionMessage(warning_condition)
+    )
+
+    invokeRestart("muffleWarning")
+  }
+)
+
+development_poly_matrix <- development_poly$rho
+development_poly_thresholds <- development_poly$tau
+
+if (length(polychoric_warnings) > 0L) {
+  stop(
+    "Development polychoric estimation produced warning(s): ",
+    paste(unique(polychoric_warnings), collapse = " | ")
+  )
+}
+
+if (!identical(dim(development_poly_matrix), c(9L, 9L))) {
+  stop("The development polychoric matrix is not 9 by 9.")
+}
+
+if (
+  !identical(rownames(development_poly_matrix), phq9_items) ||
+  !identical(colnames(development_poly_matrix), phq9_items)
+) {
+  stop("The development polychoric matrix has an unexpected item order.")
+}
+
+if (any(!is.finite(development_poly_matrix))) {
+  stop("The development polychoric matrix contains non-finite estimates.")
+}
+
+if (
+  !isTRUE(
+    all.equal(
+      development_poly_matrix,
+      t(development_poly_matrix),
+      tolerance = 1e-12
+    )
+  )
+) {
+  stop("The development polychoric matrix is not symmetric.")
+}
+
+if (any(abs(diag(development_poly_matrix) - 1) > 1e-12)) {
+  stop("The development polychoric matrix does not have a unit diagonal.")
+}
+
+if (
+  min(development_poly_matrix) < -1 ||
+  max(development_poly_matrix) > 1
+) {
+  stop("The development polychoric matrix contains values outside -1 to 1.")
+}
+
+if (!identical(dim(development_poly_thresholds), c(9L, 3L))) {
+  stop("The development threshold matrix is not 9 by 3.")
+}
+
+if (any(!is.finite(development_poly_thresholds))) {
+  stop("The development threshold matrix contains non-finite estimates.")
+}
+
+if (!identical(rownames(development_poly_thresholds), phq9_items)) {
+  stop("The development threshold matrix has an unexpected item order.")
+}
+
+if (!identical(colnames(development_poly_thresholds), c("1", "2", "3"))) {
+  stop("The development threshold matrix has unexpected column names.")
+}
+
+development_thresholds_increasing <- apply(
+  development_poly_thresholds,
+  1,
+  function(item_thresholds) {
+    all(diff(item_thresholds) > 0)
+  }
+)
+
+if (!all(development_thresholds_increasing)) {
+  stop(
+    "Thresholds are not strictly increasing for: ",
+    paste(
+      phq9_items[!development_thresholds_increasing],
+      collapse = ", "
+    )
+  )
+}
+
+development_poly_eigenvalues <- eigen(
+  development_poly_matrix,
+  symmetric = TRUE,
+  only.values = TRUE
+)$values
+
+development_poly_minimum_eigenvalue <- min(
+  development_poly_eigenvalues
+)
+
+if (development_poly_minimum_eigenvalue <= 0) {
+  stop(
+    "The development polychoric matrix is not positive definite. ",
+    "Minimum eigenvalue: ",
+    development_poly_minimum_eigenvalue
+  )
+}
+
+development_poly_off_diagonal <- development_poly_matrix[
+  lower.tri(development_poly_matrix)
+]
+
+development_poly_diagnostics <- tibble(
+  sample_n = nrow(development_items),
+  item_n = ncol(development_items),
+  threshold_n_per_item = ncol(development_poly_thresholds),
+  warning_n = length(polychoric_warnings),
+  minimum_correlation = min(development_poly_off_diagonal),
+  maximum_correlation = max(development_poly_off_diagonal),
+  minimum_eigenvalue = development_poly_minimum_eigenvalue,
+  positive_definite = development_poly_minimum_eigenvalue > 0,
+  smoothing_requested = FALSE,
+  continuity_correction = 0.5,
+  global_thresholds = TRUE
+)
+
+# 12. Define the validated Stage 3 split object --------------------------------
 
 stage3_split_object <- list(
   metadata = list(
     source_file = "data/processed/phq9_stage2a_data.rds",
     split_seed = split_seed,
     complete_sample_n = expected_complete_n,
-
     development_sample_n = expected_development_n,
     validation_sample_n = expected_validation_n,
     phq9_items = phq9_items,
     r_version = R.version.string,
-
     package_versions = c(
       dplyr = as.character(packageVersion("dplyr")),
       tidyr = as.character(packageVersion("tidyr")),
       readr = as.character(packageVersion("readr")),
       here = as.character(packageVersion("here")),
-      tibble = as.character(packageVersion("tibble"))
+      tibble = as.character(packageVersion("tibble")),
+      psych = as.character(packageVersion("psych"))
     )
   ),
-
   data = phq9_stage3_split,
   split_summary = split_summary,
   item_category_frequencies = item_category_frequencies,
-  item_floor_summary = item_floor_summary
+  item_floor_summary = item_floor_summary,
+  development_polychoric = list(
+    correlation_matrix = development_poly_matrix,
+    thresholds = development_poly_thresholds,
+    eigenvalues = development_poly_eigenvalues,
+    diagnostics = development_poly_diagnostics,
+    warnings = unique(polychoric_warnings),
+    estimation_settings = list(
+      correct = 0.5,
+      smooth = FALSE,
+      global = TRUE,
+      progress = FALSE
+    )
+  )
 )
 
-# 10a. Calculate PHQ-9 total-score distribution -------------------------------
+# 13. Calculate PHQ-9 total-score distribution --------------------------------
 
 phq9_total_distribution <- phq9_stage3_split |>
   mutate(phq9_total = rowSums(pick(all_of(phq9_items)))) |>
@@ -356,7 +518,7 @@ phq9_total_distribution <- phq9_stage3_split |>
 
 stage3_split_object$phq9_total_distribution <- phq9_total_distribution
 
-# 11. Save validated Stage 3 split outputs -------------------------------------
+# 14. Save validated Stage 3 split outputs -------------------------------------
 
 saveRDS(
   stage3_split_object,
