@@ -1,0 +1,3 @@
+stage3_sample,participant_n,unique_seqn_n,duplicated_seqn_n,missing_seqn_n,missing_item_value_n,minimum_item_response,maximum_item_response,noninteger_item_value_n,phq9_total_mean,phq9_total_sd,phq9_total_median,phq9_total_minimum,phq9_total_maximum
+development,4138,4138,0,0,0,0,3,0,3.3535524407926567,4.32820077157385,2,0,27
+validation,4138,4138,0,0,0,0,3,0,3.2501208313194825,4.223457547117589,2,0,26
