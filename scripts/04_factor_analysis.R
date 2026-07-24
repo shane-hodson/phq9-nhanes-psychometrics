@@ -6,11 +6,13 @@
 #   - reconstruct the complete-PHQ-9 analytic sample with SEQN retained
 #   - create the locked 50:50 development and validation split
 #   - validate both split samples
-#   - estimate the development-sample polychoric correlation matrix
-#   - validate the polychoric matrix and ordinal thresholds
-#   - save the recoverable split and polychoric-analysis objects
+#   - estimate and validate the development-sample polychoric matrix
+#   - run the prespecified single-core ordinal parallel analysis
+#   - reconstruct and validate the 95th-percentile factor recommendation
+#   - save the recoverable split, polychoric and parallel-analysis objects
 #
-# Parallel analysis, EFA and CFA are not yet run in this script.
+# Parallel analysis supports three factors.
+# EFA and CFA are not yet run in this script.
 # ==============================================================================
 
 # 1. Install any missing packages ----------------------------------------------
@@ -462,7 +464,223 @@ development_poly_diagnostics <- tibble(
   global_thresholds = TRUE
 )
 
-# 12. Define the validated Stage 3 split object --------------------------------
+# 12. Run the prespecified ordinal parallel analysis ---------------------------
+
+parallel_analysis_seed <- 20260724L
+parallel_analysis_iterations <- 1000L
+parallel_analysis_quantile <- 0.95
+
+parallel_analysis_warnings <- character()
+
+parallel_results <- local({
+  previous_mc_cores <- getOption("mc.cores")
+
+  on.exit(
+    options(mc.cores = previous_mc_cores),
+    add = TRUE
+  )
+
+  options(mc.cores = 1L)
+  set.seed(parallel_analysis_seed)
+
+  withCallingHandlers(
+    psych::fa.parallel(
+      x = development_items,
+      fm = "minres",
+      fa = "fa",
+      nfactors = 1,
+      n.iter = parallel_analysis_iterations,
+      SMC = FALSE,
+      sim = FALSE,
+      quant = parallel_analysis_quantile,
+      cor = "poly",
+      correct = 0.5,
+      plot = FALSE
+    ),
+    warning = function(warning_condition) {
+      parallel_analysis_warnings <<- c(
+        parallel_analysis_warnings,
+        conditionMessage(warning_condition)
+      )
+
+      invokeRestart("muffleWarning")
+    }
+  )
+})
+
+# 13. Validate and reconstruct the parallel-analysis recommendation ------------
+
+parallel_factor_columns <- paste0(
+  "F",
+  seq_along(phq9_items)
+)
+
+if (length(parallel_analysis_warnings) > 0L) {
+  stop(
+    "Parallel analysis produced warning(s): ",
+    paste(
+      unique(parallel_analysis_warnings),
+      collapse = " | "
+    )
+  )
+}
+
+if (!is.matrix(parallel_results$values)) {
+  stop("The parallel-analysis simulation results are not a matrix.")
+}
+
+if (nrow(parallel_results$values) != parallel_analysis_iterations) {
+  stop(
+    "The parallel-analysis simulation matrix has an unexpected ",
+    "number of iterations."
+  )
+}
+
+if (
+  !all(
+    parallel_factor_columns %in%
+    colnames(parallel_results$values)
+  )
+) {
+  stop(
+    "The parallel-analysis simulation matrix does not contain ",
+    "the expected F1 to F9 columns."
+  )
+}
+
+parallel_observed_eigenvalues <- as.numeric(
+  parallel_results$fa.values
+)
+
+if (
+  length(parallel_observed_eigenvalues) !=
+  length(phq9_items)
+) {
+  stop(
+    "The parallel analysis returned an unexpected number of ",
+    "observed factor eigenvalues."
+  )
+}
+
+if (any(!is.finite(parallel_observed_eigenvalues))) {
+  stop(
+    "The observed parallel-analysis factor eigenvalues contain ",
+    "non-finite values."
+  )
+}
+
+parallel_simulated_factor_eigenvalues <- parallel_results$values[
+  ,
+  parallel_factor_columns,
+  drop = FALSE
+]
+
+if (
+  any(
+    !is.finite(
+      parallel_simulated_factor_eigenvalues
+    )
+  )
+) {
+  stop(
+    "The simulated parallel-analysis factor eigenvalues contain ",
+    "non-finite values."
+  )
+}
+
+parallel_95th_thresholds <- apply(
+  parallel_simulated_factor_eigenvalues,
+  2,
+  stats::quantile,
+  probs = parallel_analysis_quantile,
+  na.rm = TRUE,
+  names = FALSE
+)
+
+if (
+  length(parallel_95th_thresholds) !=
+  length(phq9_items)
+) {
+  stop(
+    "The reconstructed parallel-analysis thresholds have an ",
+    "unexpected length."
+  )
+}
+
+if (any(!is.finite(parallel_95th_thresholds))) {
+  stop(
+    "The reconstructed parallel-analysis thresholds contain ",
+    "non-finite values."
+  )
+}
+
+parallel_exceeds_threshold <- (
+  parallel_observed_eigenvalues >
+    parallel_95th_thresholds
+)
+
+parallel_custom_nfact <- if (
+  all(parallel_exceeds_threshold)
+) {
+  length(parallel_exceeds_threshold)
+} else {
+  which(!parallel_exceeds_threshold)[1] - 1L
+}
+
+parallel_psych_nfact <- as.integer(
+  parallel_results$nfact
+)
+
+if (
+  length(parallel_psych_nfact) != 1L ||
+  is.na(parallel_psych_nfact)
+) {
+  stop(
+    "psych::fa.parallel() did not return one valid factor ",
+    "recommendation."
+  )
+}
+
+if (
+  !identical(
+    as.integer(parallel_custom_nfact),
+    parallel_psych_nfact
+  )
+) {
+  stop(
+    "The reconstructed leading-consecutive recommendation does ",
+    "not agree with psych::fa.parallel(). Custom recommendation: ",
+    parallel_custom_nfact,
+    "; psych recommendation: ",
+    parallel_psych_nfact,
+    "."
+  )
+}
+
+parallel_comparison <- tibble(
+  factor_number = seq_along(phq9_items),
+  observed_eigenvalue = parallel_observed_eigenvalues,
+  threshold_95th = parallel_95th_thresholds,
+  exceeds_threshold = parallel_exceeds_threshold
+)
+
+parallel_analysis_diagnostics <- tibble(
+  sample_n = nrow(development_items),
+  item_n = ncol(development_items),
+  seed = parallel_analysis_seed,
+  iterations = parallel_analysis_iterations,
+  quantile = parallel_analysis_quantile,
+  warning_n = length(parallel_analysis_warnings),
+  mc_cores = 1L,
+  custom_recommended_factors = parallel_custom_nfact,
+  psych_recommended_factors = parallel_psych_nfact,
+  recommendations_agree = identical(
+    as.integer(parallel_custom_nfact),
+    parallel_psych_nfact
+  )
+)
+
+# 14. Define the validated Stage 3 split object --------------------------------
 
 stage3_split_object <- list(
   metadata = list(
@@ -498,10 +716,37 @@ stage3_split_object <- list(
       global = TRUE,
       progress = FALSE
     )
+  ),
+  development_parallel_analysis = list(
+    observed_factor_eigenvalues = parallel_observed_eigenvalues,
+    simulated_factor_eigenvalues = (
+      parallel_simulated_factor_eigenvalues
+    ),
+    threshold_95th = parallel_95th_thresholds,
+    comparison = parallel_comparison,
+    recommended_factors = parallel_custom_nfact,
+    psych_recommended_factors = parallel_psych_nfact,
+    diagnostics = parallel_analysis_diagnostics,
+    warnings = unique(parallel_analysis_warnings),
+    psych_call = parallel_results$Call,
+    estimation_settings = list(
+      seed = parallel_analysis_seed,
+      iterations = parallel_analysis_iterations,
+      fm = "minres",
+      fa = "fa",
+      nfactors = 1L,
+      SMC = FALSE,
+      sim = FALSE,
+      quantile = parallel_analysis_quantile,
+      correlation = "poly",
+      continuity_correction = 0.5,
+      plot = FALSE,
+      mc_cores = 1L
+    )
   )
 )
 
-# 13. Calculate PHQ-9 total-score distribution --------------------------------
+# 15. Calculate PHQ-9 total-score distribution --------------------------------
 
 phq9_total_distribution <- phq9_stage3_split |>
   mutate(phq9_total = rowSums(pick(all_of(phq9_items)))) |>
@@ -518,7 +763,7 @@ phq9_total_distribution <- phq9_stage3_split |>
 
 stage3_split_object$phq9_total_distribution <- phq9_total_distribution
 
-# 14. Save validated Stage 3 split outputs -------------------------------------
+# 16. Save validated Stage 3 outputs -------------------------------------------
 
 saveRDS(
   stage3_split_object,
