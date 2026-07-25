@@ -1,9 +1,9 @@
 # Analysis Plan
 
-**Repository:** `phq9-nhanes-psychometrics`  
-**Analysis plan version:** 1.5
-**Last updated:** 23 July 2026
-**Current stage:** Stage 3 dimensionality-analysis specification locked before analysis on 23 July 2026; implementation has not begun.
+**Repository:** `phq9-nhanes-psychometrics`
+**Analysis plan version:** 1.6
+**Last updated:** 24 July 2026
+**Current stage:** Stage 3 development-sample dimensionality analyses and the model-freezing decision are complete. No secondary multifactor CFA was frozen. The prespecified one-factor validation CFA has not yet been fitted.
 
 ## 1. Project title
 
@@ -629,6 +629,20 @@ The model-freezing record will state:
 
 When no multifactor solution satisfies these conditions, only the prespecified one-factor CFA will be fitted in the validation sample.
 
+#### Recorded development-stage decision — 24 July 2026
+
+Ordinal parallel analysis recommended three factors in the development sample. The custom leading-consecutive calculation agreed with `psych::fa.parallel()`. However, the second and third retained factor eigenvalues were small in absolute magnitude, at `.273` and `.111`, respectively, and the exploratory multifactor solutions did not satisfy the prespecified criteria for confirmatory freezing.
+
+The three-factor solution was not eligible for freezing because one factor was primarily defined by only two clear indicators, `DPQ070` and `DPQ080`. This failed the requirement that every frozen factor contain at least three substantively coherent indicators. The three-factor correlations were also high, ranging from `.693` to `.807`, indicating limited separation between the proposed dimensions.
+
+The two-factor solution improved the residual and approximate-fit statistics relative to the one-factor EFA, but its loading pattern was not sufficiently stable or distinct for a simple-structure CFA. `DPQ010`, `DPQ070` and `DPQ080` each had cross-loadings above `.30`, with primary-versus-secondary absolute loading gaps of only `.075`, `.099` and `.115`, respectively. The two factors correlated at `.780`. Freezing this model would therefore require several substantial exploratory cross-loadings to be fixed to zero despite weak empirical separation and insufficiently distinct substantive interpretation.
+
+The exploratory evidence is interpreted as showing a strong general PHQ-9 factor accompanied by reproducible residual multidimensionality that does not organise into a sufficiently coherent simple structure for separate confirmatory validation.
+
+No secondary multifactor CFA was frozen.
+
+The validation stage will contain only the prespecified one-factor ordinal CFA. This decision was recorded before the validation-sample factor structure or CFA results were accessed. Validation results will not be used to retrospectively freeze another model, add correlated residuals or cross-loadings, delete items, or introduce bifactor or other post hoc models.
+
 No bifactor model will be fitted in version 1.
 
 ### 12.9 Primary validation-sample CFA
@@ -664,6 +678,8 @@ The default categorical-data parameterisation used by the installed `lavaan` ver
 The R version and installed `lavaan` version will be recorded.
 
 ### 12.10 Role of any frozen alternative CFA
+
+No alternative CFA was frozen in the development stage. The one-factor CFA is therefore the sole validation model. The remainder of this subsection documents the prespecified role that would have applied had an eligible alternative been frozen.
 
 The one-factor CFA is the primary validation model.
 
@@ -967,6 +983,8 @@ Stage 3 will proceed in the following order:
 13. update the Quarto report;
 14. complete Stage 3 methodological, academic-voice and repository review.
 
+At step 8, no alternative multifactor model satisfied the freezing criteria. Step 10 is therefore not applicable, and the validation stage will contain only the prespecified one-factor ordinal CFA.
+
 No parallel analysis, EFA, CFA or model comparison will be run before analysis plan version 1.5 is committed.
 
 ## 13. Later planned analyses
@@ -1166,16 +1184,16 @@ phq9-nhanes-psychometrics/
 ### Stage 3: dimensionality analysis
 
 - [x] Lock the Stage 3 dimensionality-analysis specification before analysis.
-- [ ] Create the fixed-seed development and validation split.
-- [ ] Validate sample size, response coding and category availability in both split samples.
-- [ ] Estimate and validate the unsmoothed development-sample polychoric matrix.
-- [ ] Conduct the controlled single-core ordinal parallel analysis.
-- [ ] Reconstruct the resampled 95th-percentile factor-eigenvalue thresholds.
-- [ ] Check the custom leading-consecutive recommendation against `parallel_results$nfact`.
-- [ ] Conduct the permitted development-sample exploratory factor analyses.
-- [ ] Record and freeze at most one eligible alternative CFA before accessing validation results.
+- [x] Create the fixed-seed development and validation split.
+- [x] Validate sample size, response coding and category availability in both split samples.
+- [x] Estimate and validate the unsmoothed development-sample polychoric matrix.
+- [x] Conduct the controlled single-core ordinal parallel analysis.
+- [x] Reconstruct the resampled 95th-percentile factor-eigenvalue thresholds.
+- [x] Check the custom leading-consecutive recommendation against `parallel_results$nfact`.
+- [x] Conduct the permitted development-sample exploratory factor analyses.
+- [x] Record the alternative-model freezing decision before accessing validation results; no eligible alternative CFA was frozen.
 - [ ] Fit the prespecified one-factor ordinal CFA in the validation sample.
-- [ ] Fit one frozen secondary multifactor CFA only when permitted by the development-stage decision.
+- [x] Determine that no secondary multifactor CFA will be fitted because no candidate met the freezing criteria.
 - [ ] Extract robust global-fit measures.
 - [ ] Report fully standardised factor loadings with 95% Wald-type confidence intervals.
 - [ ] Extract and validate item thresholds.
@@ -1190,4 +1208,4 @@ phq9-nhanes-psychometrics/
 
 Stage 2A and Stage 2B review and validation are complete.
 
-The Stage 3 dimensionality-analysis specification was locked before analysis on 23 July 2026. Stage 3 implementation has not begun.
+The Stage 3 dimensionality-analysis specification was locked before analysis on 23 July 2026. The fixed split, split validation, development polychoric matrix, ordinal parallel analysis, permitted EFAs and model-freezing decision are complete. No secondary multifactor CFA was frozen. The prespecified one-factor validation CFA has not yet been fitted.
