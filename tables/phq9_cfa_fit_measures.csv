@@ -1,0 +1,10 @@
+display_order,measure,measure_label,measure_family,value,confidence_level
+1,chisq.scaled,Scaled-and-shifted chi-square,model_test,472.1330642450573,NA
+2,df.scaled,Scaled-and-shifted degrees of freedom,model_test,27,NA
+3,pvalue.scaled,Scaled-and-shifted p-value,model_test,0,NA
+4,cfi.robust,Robust CFI,incremental_fit,0.9238051733763795,NA
+5,tli.robust,Robust TLI,incremental_fit,0.8984068978351727,NA
+6,rmsea.robust,Robust RMSEA,error_of_approximation,0.12662770423577724,NA
+7,rmsea.ci.lower.robust,Robust RMSEA 90% CI lower bound,error_of_approximation,0.11396113250064518,0.9
+8,rmsea.ci.upper.robust,Robust RMSEA 90% CI upper bound,error_of_approximation,0.139708120466721,0.9
+9,srmr,SRMR,standardized_residual,0.04778302145313325,NA

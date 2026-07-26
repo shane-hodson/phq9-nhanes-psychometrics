@@ -1,0 +1,10 @@
+sample,sample_n,factor_number,observed_factor_eigenvalue,simulated_95th_percentile,observed_exceeds_95th_percentile,recommended_factor_count,simulation_iterations,recommendation_rule
+development,4138,1,5.168736193380365,1.0326679910749264,TRUE,3,1000,Leading consecutive observed factor eigenvalues exceeding the simulated 95th-percentile values
+development,4138,2,0.2729498940481452,0.14146877193418228,TRUE,3,1000,Leading consecutive observed factor eigenvalues exceeding the simulated 95th-percentile values
+development,4138,3,0.11083230099375269,0.09653041080556696,TRUE,3,1000,Leading consecutive observed factor eigenvalues exceeding the simulated 95th-percentile values
+development,4138,4,0.03870744126606787,0.06221689275062187,FALSE,3,1000,Leading consecutive observed factor eigenvalues exceeding the simulated 95th-percentile values
+development,4138,5,-0.012018664075851282,0.03261752405213173,FALSE,3,1000,Leading consecutive observed factor eigenvalues exceeding the simulated 95th-percentile values
+development,4138,6,-0.04997584479310013,0.005714379374924603,FALSE,3,1000,Leading consecutive observed factor eigenvalues exceeding the simulated 95th-percentile values
+development,4138,7,-0.09389992678896199,-0.019688188198406634,FALSE,3,1000,Leading consecutive observed factor eigenvalues exceeding the simulated 95th-percentile values
+development,4138,8,-0.12694586239900044,-0.04761453977610047,FALSE,3,1000,Leading consecutive observed factor eigenvalues exceeding the simulated 95th-percentile values
+development,4138,9,-0.1396490689766775,-0.0810558936189951,FALSE,3,1000,Leading consecutive observed factor eigenvalues exceeding the simulated 95th-percentile values
