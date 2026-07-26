@@ -4,20 +4,24 @@
 #
 # Current implementation scope:
 #   - reconstruct the complete-PHQ-9 analytic sample with SEQN retained
-#   - create the locked 50:50 development and validation split
-#   - validate both split samples
+#   - create and validate the locked 50:50 development and validation split
 #   - estimate and validate the development-sample polychoric matrix
-#   - run the prespecified single-core ordinal parallel analysis
-#   - reconstruct and validate the 95th-percentile factor recommendation
+#   - run and validate the prespecified ordinal parallel analysis
 #   - fit and validate the permitted development-sample EFA solutions
-#   - extract EFA loading, factor-correlation, residual and fit diagnostics
 #   - record the development-stage model-freezing decision
-#   - save the recoverable split, polychoric, parallel-analysis and EFA objects
+#   - fit the prespecified validation-sample one-factor ordinal CFA
+#   - extract and validate global-fit, loading, threshold, residual and
+#     computational diagnostics
+#   - record the validation-stage dimensionality conclusion
+#   - save the complete recoverable Stage 3 analysis object
 #
-# Parallel analysis supports three factors.
-# Neither multifactor EFA satisfied the locked criteria for freezing a
-# secondary validation CFA.
-# No validation-sample CFA is run in the current implementation.
+# Parallel analysis supported three factors, but neither multifactor EFA
+# satisfied the locked criteria for freezing a secondary validation CFA.
+#
+# The one-factor ordinal CFA is the sole validation model.
+# The final Stage 3 dimensionality conclusion is mixed evidence.
+# No post hoc alternative models, correlated residuals, cross-loadings or
+# item deletions are fitted in this script.
 # ==============================================================================
 
 # 1. Install any missing packages ----------------------------------------------
@@ -29,7 +33,8 @@ required_packages <- c(
   "here",
   "tibble",
   "psych",
-  "GPArotation"
+  "GPArotation",
+  "lavaan"
 )
 
 missing_packages <- required_packages[
@@ -1646,7 +1651,1171 @@ phq9_total_distribution <- phq9_stage3_split |>
     phq9_total
   )
 
-# 20. Define the validated Stage 3 object --------------------------------------
+# 20. Prepare and validate the validation-sample data --------------------------
+
+validation_data <- phq9_stage3_split |>
+  filter(
+    stage3_sample == "validation"
+  ) |>
+  select(
+    all_of(phq9_items)
+  )
+
+validation_category_counts <- lapply(
+  validation_data,
+  table,
+  useNA = "always"
+)
+
+validation_data_checks <- c(
+  expected_participant_n = (
+    nrow(validation_data) ==
+      expected_validation_n
+  ),
+  expected_item_n = (
+    ncol(validation_data) ==
+      length(phq9_items)
+  ),
+  expected_item_order = identical(
+    names(validation_data),
+    phq9_items
+  ),
+  no_missing_responses = (
+    sum(is.na(validation_data)) == 0L
+  ),
+  all_values_finite = all(
+    is.finite(
+      as.matrix(validation_data)
+    )
+  ),
+  valid_response_range = all(
+    as.matrix(validation_data) >= 0 &
+      as.matrix(validation_data) <= 3
+  ),
+  integer_response_coding = all(
+    as.matrix(validation_data) ==
+      floor(as.matrix(validation_data))
+  ),
+  all_categories_present_per_item = all(
+    vapply(
+      validation_data,
+      function(item_values) {
+        setequal(
+          sort(
+            unique(
+              as.numeric(item_values)
+            )
+          ),
+          0:3
+        )
+      },
+      logical(1)
+    )
+  )
+)
+
+if (!all(validation_data_checks)) {
+  failed_validation_checks <- names(
+    validation_data_checks
+  )[
+    !validation_data_checks
+  ]
+
+  stop(
+    "The validation-sample data failed the following checks: ",
+    paste(
+      failed_validation_checks,
+      collapse = ", "
+    )
+  )
+}
+
+if (
+  !identical(
+    validation_model_plan$primary_validation_model,
+    "one_factor"
+  ) ||
+  !identical(
+    validation_model_plan$secondary_model_frozen,
+    FALSE
+  )
+) {
+  stop(
+    "The stored development-stage model plan does not permit ",
+    "the prespecified one-factor-only validation analysis."
+  )
+}
+
+# 21. Fit the prespecified one-factor ordinal CFA ------------------------------
+
+one_factor_model <- '
+  Depression =~ DPQ010 + DPQ020 + DPQ030 +
+                DPQ040 + DPQ050 + DPQ060 +
+                DPQ070 + DPQ080 + DPQ090
+'
+
+cfa_warnings <- character()
+
+cfa_fit <- withCallingHandlers(
+  lavaan::cfa(
+    model = one_factor_model,
+    data = validation_data,
+    ordered = phq9_items,
+    estimator = "WLSMV",
+    std.lv = TRUE
+  ),
+  warning = function(warning_condition) {
+    cfa_warnings <<- c(
+      cfa_warnings,
+      conditionMessage(warning_condition)
+    )
+
+    invokeRestart("muffleWarning")
+  }
+)
+
+cfa_warnings <- unique(cfa_warnings)
+
+if (length(cfa_warnings) > 0L) {
+  stop(
+    "The validation CFA produced one or more warnings: ",
+    paste(
+      cfa_warnings,
+      collapse = " | "
+    )
+  )
+}
+
+cfa_converged <- lavaan::lavInspect(
+  cfa_fit,
+  "converged"
+)
+
+cfa_post_check <- lavaan::lavInspect(
+  cfa_fit,
+  "post.check"
+)
+
+cfa_observation_n <- as.integer(
+  lavaan::lavInspect(
+    cfa_fit,
+    "nobs"
+  )
+)
+
+cfa_free_parameter_n <- as.integer(
+  lavaan::lavInspect(
+    cfa_fit,
+    "npar"
+  )
+)
+
+if (!identical(cfa_converged, TRUE)) {
+  stop(
+    "The validation CFA did not converge."
+  )
+}
+
+if (!identical(cfa_post_check, TRUE)) {
+  stop(
+    "The validation CFA failed lavaan's post-estimation ",
+    "admissibility check."
+  )
+}
+
+if (
+  !identical(
+    cfa_observation_n,
+    expected_validation_n
+  )
+) {
+  stop(
+    "The validation CFA used an unexpected number of ",
+    "observations."
+  )
+}
+
+if (!identical(cfa_free_parameter_n, 36L)) {
+  stop(
+    "The validation CFA returned an unexpected number of ",
+    "free parameters."
+  )
+}
+
+# 22. Extract resolved options and model-test information ----------------------
+
+cfa_resolved_options <- lavaan::lavInspect(
+  cfa_fit,
+  "options"
+)
+
+required_resolved_options <- c(
+  "estimator",
+  "estimator.orig",
+  "parameterization",
+  "std.lv",
+  "se",
+  "test",
+  "information",
+  "information.meat"
+)
+
+missing_resolved_options <- setdiff(
+  required_resolved_options,
+  names(cfa_resolved_options)
+)
+
+if (length(missing_resolved_options) > 0L) {
+  stop(
+    "The fitted CFA does not expose the following required ",
+    "resolved options: ",
+    paste(
+      missing_resolved_options,
+      collapse = ", "
+    )
+  )
+}
+
+resolved_option_checks <- c(
+  requested_estimator_wlsmv = identical(
+    cfa_resolved_options$estimator.orig,
+    "WLSMV"
+  ),
+  internal_estimator_dwls = identical(
+    cfa_resolved_options$estimator,
+    "DWLS"
+  ),
+  delta_parameterization = identical(
+    cfa_resolved_options$parameterization,
+    "delta"
+  ),
+  standardised_latent_variable = identical(
+    cfa_resolved_options$std.lv,
+    TRUE
+  ),
+  robust_standard_errors = identical(
+    cfa_resolved_options$se,
+    "robust.sem"
+  ),
+  scaled_shifted_test_available = (
+    "scaled.shifted" %in%
+      cfa_resolved_options$test
+  )
+)
+
+if (!all(resolved_option_checks)) {
+  failed_option_checks <- names(
+    resolved_option_checks
+  )[
+    !resolved_option_checks
+  ]
+
+  stop(
+    "The fitted CFA failed the following resolved-option checks: ",
+    paste(
+      failed_option_checks,
+      collapse = ", "
+    )
+  )
+}
+
+cfa_test_information <- lavaan::lavInspect(
+  cfa_fit,
+  "test"
+)
+
+required_cfa_tests <- c(
+  "standard",
+  "scaled.shifted"
+)
+
+if (
+  !all(
+    required_cfa_tests %in%
+    names(cfa_test_information)
+  )
+) {
+  stop(
+    "The fitted CFA does not contain both the standard and ",
+    "scaled-and-shifted model tests."
+  )
+}
+
+cfa_standard_test <- cfa_test_information$standard
+cfa_scaled_shifted_test <- (
+  cfa_test_information$scaled.shifted
+)
+
+required_scaled_shifted_components <- c(
+  "stat",
+  "df",
+  "pvalue",
+  "scaling.factor",
+  "shift.parameter",
+  "scaled.test.stat",
+  "scaled.test",
+  "label"
+)
+
+missing_scaled_shifted_components <- setdiff(
+  required_scaled_shifted_components,
+  names(cfa_scaled_shifted_test)
+)
+
+if (
+  length(missing_scaled_shifted_components) > 0L
+) {
+  stop(
+    "The scaled-and-shifted test is missing the following ",
+    "required components: ",
+    paste(
+      missing_scaled_shifted_components,
+      collapse = ", "
+    )
+  )
+}
+
+required_model_test_values <- c(
+  standard_statistic = cfa_standard_test$stat,
+  standard_degrees_of_freedom = cfa_standard_test$df,
+  scaled_shifted_statistic = (
+    cfa_scaled_shifted_test$stat
+  ),
+  scaled_shifted_degrees_of_freedom = (
+    cfa_scaled_shifted_test$df
+  ),
+  scaled_shifted_p_value = (
+    cfa_scaled_shifted_test$pvalue
+  ),
+  scaling_factor = (
+    cfa_scaled_shifted_test$scaling.factor
+  ),
+  shift_parameter = (
+    cfa_scaled_shifted_test$shift.parameter
+  ),
+  scaled_test_statistic = (
+    cfa_scaled_shifted_test$scaled.test.stat
+  )
+)
+
+if (
+  !all(
+    is.finite(
+      required_model_test_values
+    )
+  )
+) {
+  stop(
+    "The validation CFA contains a non-finite required ",
+    "model-test value."
+  )
+}
+
+if (
+  abs(
+    cfa_standard_test$stat -
+    cfa_scaled_shifted_test$scaled.test.stat
+  ) > 1e-10
+) {
+  stop(
+    "The standard test statistic does not match the stored ",
+    "underlying statistic for the scaled-and-shifted test."
+  )
+}
+
+if (
+  !identical(
+    as.integer(cfa_standard_test$df),
+    as.integer(cfa_scaled_shifted_test$df)
+  )
+) {
+  stop(
+    "The standard and scaled-and-shifted tests have different ",
+    "degrees of freedom."
+  )
+}
+
+cfa_model_test_table <- tibble::tibble(
+  test = c(
+    "standard",
+    "scaled_and_shifted"
+  ),
+  statistic = c(
+    cfa_standard_test$stat,
+    cfa_scaled_shifted_test$stat
+  ),
+  degrees_of_freedom = c(
+    cfa_standard_test$df,
+    cfa_scaled_shifted_test$df
+  ),
+  p_value = c(
+    cfa_standard_test$pvalue,
+    cfa_scaled_shifted_test$pvalue
+  ),
+  scaling_factor = c(
+    NA_real_,
+    cfa_scaled_shifted_test$scaling.factor
+  ),
+  shift_parameter = c(
+    NA_real_,
+    cfa_scaled_shifted_test$shift.parameter
+  ),
+  underlying_standard_statistic = c(
+    NA_real_,
+    cfa_scaled_shifted_test$scaled.test.stat
+  ),
+  correction_label = c(
+    NA_character_,
+    cfa_scaled_shifted_test$label
+  )
+)
+
+# 23. Extract and validate the prespecified fit measures -----------------------
+
+cfa_fit_measures_all <- lavaan::fitMeasures(
+  cfa_fit
+)
+
+requested_fit_measure_names <- c(
+  "chisq.scaled",
+  "df.scaled",
+  "pvalue.scaled",
+  "cfi.robust",
+  "tli.robust",
+  "rmsea.robust",
+  "rmsea.ci.lower.robust",
+  "rmsea.ci.upper.robust",
+  "srmr"
+)
+
+missing_requested_measures <- setdiff(
+  requested_fit_measure_names,
+  names(cfa_fit_measures_all)
+)
+
+if (length(missing_requested_measures) > 0L) {
+  stop(
+    "The following prespecified CFA fit measures are unavailable: ",
+    paste(
+      missing_requested_measures,
+      collapse = ", "
+    )
+  )
+}
+
+requested_fit_measure_values <- (
+  cfa_fit_measures_all[
+    requested_fit_measure_names
+  ]
+)
+
+if (
+  any(
+    is.na(
+      requested_fit_measure_values
+    )
+  ) ||
+  any(
+    !is.finite(
+      requested_fit_measure_values
+    )
+  )
+) {
+  stop(
+    "One or more prespecified CFA fit measures are missing or ",
+    "non-finite."
+  )
+}
+
+cfa_fit_measure_table <- tibble::tibble(
+  measure = requested_fit_measure_names,
+  value = unname(
+    requested_fit_measure_values
+  )
+)
+
+if (
+  abs(
+    cfa_fit_measures_all["chisq.scaled"] -
+    cfa_scaled_shifted_test$stat
+  ) > 1e-10 ||
+  abs(
+    cfa_fit_measures_all["df.scaled"] -
+    cfa_scaled_shifted_test$df
+  ) > 1e-10 ||
+  abs(
+    cfa_fit_measures_all["pvalue.scaled"] -
+    cfa_scaled_shifted_test$pvalue
+  ) > 1e-10
+) {
+  stop(
+    "The scaled fit-measure entries do not agree with the ",
+    "scaled-and-shifted model-test object."
+  )
+}
+
+# 24. Extract and validate loadings and thresholds -----------------------------
+
+cfa_standardized_all <- tibble::as_tibble(
+  lavaan::standardizedSolution(
+    cfa_fit,
+    type = "std.all",
+    ci = TRUE,
+    level = 0.95
+  )
+)
+
+cfa_standardized_loadings <- cfa_standardized_all |>
+  filter(
+    op == "=~"
+  ) |>
+  transmute(
+    factor = lhs,
+    item = rhs,
+    standardized_loading = est.std,
+    standard_error = se,
+    ci_lower = ci.lower,
+    ci_upper = ci.upper,
+    p_value = pvalue
+  ) |>
+  tibble::as_tibble()
+
+cfa_loading_checks <- c(
+  expected_loading_n = (
+    nrow(cfa_standardized_loadings) ==
+      length(phq9_items)
+  ),
+  expected_item_order = identical(
+    cfa_standardized_loadings$item,
+    phq9_items
+  ),
+  all_estimates_finite = all(
+    is.finite(
+      cfa_standardized_loadings$
+        standardized_loading
+    )
+  ),
+  all_standard_errors_finite = all(
+    is.finite(
+      cfa_standardized_loadings$
+        standard_error
+    )
+  ),
+  all_intervals_finite = all(
+    is.finite(
+      cfa_standardized_loadings$ci_lower
+    ) &
+      is.finite(
+        cfa_standardized_loadings$ci_upper
+      )
+  ),
+  intervals_ordered = all(
+    cfa_standardized_loadings$ci_lower <=
+      cfa_standardized_loadings$
+      standardized_loading &
+      cfa_standardized_loadings$
+      standardized_loading <=
+      cfa_standardized_loadings$ci_upper
+  ),
+  all_loadings_positive = all(
+    cfa_standardized_loadings$
+      standardized_loading > 0
+  )
+)
+
+if (!all(cfa_loading_checks)) {
+  failed_loading_checks <- names(
+    cfa_loading_checks
+  )[
+    !cfa_loading_checks
+  ]
+
+  stop(
+    "The CFA loadings failed the following checks: ",
+    paste(
+      failed_loading_checks,
+      collapse = ", "
+    )
+  )
+}
+
+cfa_parameters <- tibble::as_tibble(
+  lavaan::parameterEstimates(
+    cfa_fit,
+    ci = TRUE,
+    level = 0.95
+  )
+)
+
+cfa_thresholds <- cfa_parameters |>
+  filter(
+    op == "|"
+  ) |>
+  transmute(
+    item = lhs,
+    threshold = rhs,
+    estimate = est,
+    standard_error = se,
+    ci_lower = ci.lower,
+    ci_upper = ci.upper,
+    p_value = pvalue
+  ) |>
+  tibble::as_tibble()
+
+threshold_order_checks <- cfa_thresholds |>
+  group_by(item) |>
+  summarise(
+    threshold_n = n(),
+    estimates_strictly_increasing = all(
+      diff(estimate) > 0
+    ),
+    .groups = "drop"
+  )
+
+cfa_threshold_checks <- c(
+  expected_threshold_n = (
+    nrow(cfa_thresholds) ==
+      3L * length(phq9_items)
+  ),
+  expected_item_n = (
+    n_distinct(cfa_thresholds$item) ==
+      length(phq9_items)
+  ),
+  expected_item_order = identical(
+    unique(cfa_thresholds$item),
+    phq9_items
+  ),
+  three_thresholds_per_item = all(
+    threshold_order_checks$threshold_n == 3L
+  ),
+  all_estimates_finite = all(
+    is.finite(cfa_thresholds$estimate)
+  ),
+  all_standard_errors_finite = all(
+    is.finite(cfa_thresholds$standard_error)
+  ),
+  all_intervals_finite = all(
+    is.finite(cfa_thresholds$ci_lower) &
+      is.finite(cfa_thresholds$ci_upper)
+  ),
+  intervals_ordered = all(
+    cfa_thresholds$ci_lower <=
+      cfa_thresholds$estimate &
+      cfa_thresholds$estimate <=
+      cfa_thresholds$ci_upper
+  ),
+  thresholds_strictly_increasing = all(
+    threshold_order_checks$
+      estimates_strictly_increasing
+  )
+)
+
+if (!all(cfa_threshold_checks)) {
+  failed_threshold_checks <- names(
+    cfa_threshold_checks
+  )[
+    !cfa_threshold_checks
+  ]
+
+  stop(
+    "The CFA thresholds failed the following checks: ",
+    paste(
+      failed_threshold_checks,
+      collapse = ", "
+    )
+  )
+}
+
+# 25. Extract and validate residual diagnostics --------------------------------
+
+cfa_residual_warnings <- character()
+
+cfa_residuals <- withCallingHandlers(
+  lavaan::lavResiduals(
+    cfa_fit,
+    type = "cor.bentler",
+    zstat = TRUE,
+    summary = TRUE
+  ),
+  warning = function(warning_condition) {
+    cfa_residual_warnings <<- c(
+      cfa_residual_warnings,
+      conditionMessage(warning_condition)
+    )
+
+    invokeRestart("muffleWarning")
+  }
+)
+
+cfa_residual_warnings <- unique(
+  cfa_residual_warnings
+)
+
+if (length(cfa_residual_warnings) > 0L) {
+  stop(
+    "The CFA residual diagnostics produced one or more warnings: ",
+    paste(
+      cfa_residual_warnings,
+      collapse = " | "
+    )
+  )
+}
+
+required_residual_components <- c(
+  "cov",
+  "cov.z",
+  "summary"
+)
+
+missing_residual_components <- setdiff(
+  required_residual_components,
+  names(cfa_residuals)
+)
+
+if (length(missing_residual_components) > 0L) {
+  stop(
+    "The residual object is missing the following required ",
+    "components: ",
+    paste(
+      missing_residual_components,
+      collapse = ", "
+    )
+  )
+}
+
+cfa_residual_matrix <- as.matrix(
+  cfa_residuals$cov
+)
+
+cfa_residual_z_matrix <- as.matrix(
+  cfa_residuals$cov.z
+)
+
+cfa_observed_correlations <- as.matrix(
+  lavaan::lavInspect(
+    cfa_fit,
+    "sampstat"
+  )$cov
+)
+
+cfa_implied_correlations <- as.matrix(
+  lavaan::lavInspect(
+    cfa_fit,
+    "cov.ov"
+  )
+)
+
+residual_indices <- which(
+  lower.tri(cfa_residual_matrix),
+  arr.ind = TRUE
+)
+
+cfa_residual_correlations <- tibble::tibble(
+  item_1 = rownames(cfa_residual_matrix)[
+    residual_indices[, 1]
+  ],
+  item_2 = colnames(cfa_residual_matrix)[
+    residual_indices[, 2]
+  ],
+  residual_correlation = as.numeric(
+    cfa_residual_matrix[
+      residual_indices
+    ]
+  ),
+  standardized_residual_z = as.numeric(
+    cfa_residual_z_matrix[
+      residual_indices
+    ]
+  )
+) |>
+  mutate(
+    absolute_residual_correlation = abs(
+      residual_correlation
+    ),
+    flagged_ge_0_10 = (
+      absolute_residual_correlation >= 0.10
+    ),
+    residual_convention = (
+      "observed minus model-implied correlation"
+    )
+  ) |>
+  arrange(
+    desc(
+      absolute_residual_correlation
+    )
+  )
+
+cfa_residual_checks <- c(
+  expected_matrix_dimensions = identical(
+    dim(cfa_residual_matrix),
+    c(
+      length(phq9_items),
+      length(phq9_items)
+    )
+  ),
+  expected_z_matrix_dimensions = identical(
+    dim(cfa_residual_z_matrix),
+    c(
+      length(phq9_items),
+      length(phq9_items)
+    )
+  ),
+  expected_item_order = (
+    identical(
+      rownames(cfa_residual_matrix),
+      phq9_items
+    ) &&
+      identical(
+        colnames(cfa_residual_matrix),
+        phq9_items
+      )
+  ),
+  residual_matrix_symmetric = (
+    max(
+      abs(
+        cfa_residual_matrix -
+          t(cfa_residual_matrix)
+      )
+    ) < 1e-12
+  ),
+  z_matrix_symmetric = (
+    max(
+      abs(
+        cfa_residual_z_matrix -
+          t(cfa_residual_z_matrix)
+      )
+    ) < 1e-12
+  ),
+  residual_diagonal_zero = (
+    max(
+      abs(
+        diag(cfa_residual_matrix)
+      )
+    ) < 1e-12
+  ),
+  expected_pair_n = (
+    nrow(cfa_residual_correlations) ==
+      choose(length(phq9_items), 2L)
+  ),
+  all_residuals_finite = all(
+    is.finite(
+      cfa_residual_correlations$
+        residual_correlation
+    )
+  ),
+  all_z_values_finite = all(
+    is.finite(
+      cfa_residual_correlations$
+        standardized_residual_z
+    )
+  ),
+  matches_observed_minus_implied = (
+    max(
+      abs(
+        cfa_residual_matrix -
+          (
+            cfa_observed_correlations -
+              cfa_implied_correlations
+          )
+      )
+    ) < 1e-10
+  )
+)
+
+if (!all(cfa_residual_checks)) {
+  failed_residual_checks <- names(
+    cfa_residual_checks
+  )[
+    !cfa_residual_checks
+  ]
+
+  stop(
+    "The CFA residual diagnostics failed the following checks: ",
+    paste(
+      failed_residual_checks,
+      collapse = ", "
+    )
+  )
+}
+
+cfa_residual_summary <- tibble::as_tibble(
+  cfa_residuals$summary,
+  rownames = "summary_measure"
+)
+
+# 26. Complete variance and improper-solution checks ---------------------------
+
+cfa_standardized_variances <- cfa_standardized_all |>
+  filter(
+    op == "~~",
+    lhs == rhs
+  ) |>
+  transmute(
+    variable = lhs,
+    standardized_variance = est.std,
+    standard_error = se,
+    ci_lower = ci.lower,
+    ci_upper = ci.upper
+  ) |>
+  tibble::as_tibble()
+
+cfa_standardized_residual_variances <- (
+  cfa_standardized_variances |>
+    filter(
+      variable %in% phq9_items
+    )
+)
+
+cfa_standardized_latent_variance <- (
+  cfa_standardized_variances |>
+    filter(
+      variable == "Depression"
+    )
+)
+
+cfa_theta <- as.matrix(
+  lavaan::lavInspect(
+    cfa_fit,
+    "theta"
+  )
+)
+
+cfa_latent_covariance <- as.matrix(
+  lavaan::lavInspect(
+    cfa_fit,
+    "cov.lv"
+  )
+)
+
+variance_tolerance <- 1e-12
+
+cfa_variance_checks <- c(
+  expected_observed_residual_variance_n = (
+    nrow(
+      cfa_standardized_residual_variances
+    ) == length(phq9_items)
+  ),
+  all_standardized_variances_finite = all(
+    is.finite(
+      cfa_standardized_residual_variances$
+        standardized_variance
+    )
+  ),
+  standardized_residual_variances_positive = all(
+    cfa_standardized_residual_variances$
+      standardized_variance > 0
+  ),
+  standardized_residual_variances_within_bounds = all(
+    cfa_standardized_residual_variances$
+      standardized_variance <=
+      (1 + variance_tolerance)
+  ),
+  theta_dimensions_correct = identical(
+    dim(cfa_theta),
+    c(
+      length(phq9_items),
+      length(phq9_items)
+    )
+  ),
+  theta_finite = all(
+    is.finite(cfa_theta)
+  ),
+  theta_diagonal_positive = all(
+    diag(cfa_theta) > 0
+  ),
+  latent_covariance_dimensions_correct = identical(
+    dim(cfa_latent_covariance),
+    c(1L, 1L)
+  ),
+  latent_covariance_finite = all(
+    is.finite(cfa_latent_covariance)
+  ),
+  latent_factor_variance_fixed_to_one = (
+    abs(
+      cfa_latent_covariance[1, 1] - 1
+    ) <= variance_tolerance
+  ),
+  standardized_latent_variance_row_present = (
+    nrow(cfa_standardized_latent_variance) == 1L
+  ),
+  standardized_latent_variance_equals_one = (
+    nrow(cfa_standardized_latent_variance) == 1L &&
+      abs(
+        cfa_standardized_latent_variance$
+          standardized_variance[1] - 1
+      ) <= variance_tolerance
+  )
+)
+
+if (!all(cfa_variance_checks)) {
+  failed_variance_checks <- names(
+    cfa_variance_checks
+  )[
+    !cfa_variance_checks
+  ]
+
+  stop(
+    "The CFA variance diagnostics failed the following checks: ",
+    paste(
+      failed_variance_checks,
+      collapse = ", "
+    )
+  )
+}
+
+cfa_residual_variance_summary <- tibble::tibble(
+  residual_variance_n = nrow(
+    cfa_standardized_residual_variances
+  ),
+  minimum_standardized_residual_variance = min(
+    cfa_standardized_residual_variances$
+      standardized_variance
+  ),
+  maximum_standardized_residual_variance = max(
+    cfa_standardized_residual_variances$
+      standardized_variance
+  ),
+  all_finite = all(
+    is.finite(
+      cfa_standardized_residual_variances$
+        standardized_variance
+    )
+  ),
+  all_positive = all(
+    cfa_standardized_residual_variances$
+      standardized_variance > 0
+  ),
+  all_within_admissible_bounds = all(
+    cfa_standardized_residual_variances$
+      standardized_variance <=
+      (1 + variance_tolerance)
+  ),
+  heywood_type_result_present = FALSE
+)
+
+cfa_computational_diagnostics <- tibble::tibble(
+  model = "one_factor",
+  sample = "validation",
+  sample_n = cfa_observation_n,
+  free_parameter_n = cfa_free_parameter_n,
+  requested_estimator = (
+    cfa_resolved_options$estimator.orig
+  ),
+  internal_estimator = (
+    cfa_resolved_options$estimator
+  ),
+  parameterization = (
+    cfa_resolved_options$parameterization
+  ),
+  std_lv = cfa_resolved_options$std.lv,
+  standard_error_method = (
+    cfa_resolved_options$se
+  ),
+  test_methods = paste(
+    cfa_resolved_options$test,
+    collapse = "; "
+  ),
+  information = paste(
+    cfa_resolved_options$information,
+    collapse = "; "
+  ),
+  information_meat = paste(
+    cfa_resolved_options$information.meat,
+    collapse = "; "
+  ),
+  fitting_warning_n = length(cfa_warnings),
+  residual_warning_n = length(
+    cfa_residual_warnings
+  ),
+  converged = cfa_converged,
+  post_estimation_check_passed = (
+    cfa_post_check
+  ),
+  loadings_checked = all(
+    cfa_loading_checks
+  ),
+  thresholds_checked = all(
+    cfa_threshold_checks
+  ),
+  residuals_checked = all(
+    cfa_residual_checks
+  ),
+  variances_checked = all(
+    cfa_variance_checks
+  ),
+  improper_solution_present = FALSE
+)
+
+# 27. Record the validation-stage dimensionality conclusion --------------------
+
+validation_dimensionality_conclusion <- tibble::tibble(
+  conclusion_category = "mixed_evidence",
+  conclusion_label = "Mixed evidence",
+  decision_date = "2026-07-26",
+  primary_validation_model = "one_factor",
+  secondary_cfa_fitted = FALSE,
+  minimum_standardized_loading = min(
+    cfa_standardized_loadings$
+      standardized_loading
+  ),
+  maximum_standardized_loading = max(
+    cfa_standardized_loadings$
+      standardized_loading
+  ),
+  robust_cfi = unname(
+    cfa_fit_measures_all["cfi.robust"]
+  ),
+  robust_tli = unname(
+    cfa_fit_measures_all["tli.robust"]
+  ),
+  robust_rmsea = unname(
+    cfa_fit_measures_all["rmsea.robust"]
+  ),
+  robust_rmsea_lower = unname(
+    cfa_fit_measures_all[
+      "rmsea.ci.lower.robust"
+    ]
+  ),
+  robust_rmsea_upper = unname(
+    cfa_fit_measures_all[
+      "rmsea.ci.upper.robust"
+    ]
+  ),
+  srmr = unname(
+    cfa_fit_measures_all["srmr"]
+  ),
+  largest_absolute_residual_correlation = max(
+    cfa_residual_correlations$
+      absolute_residual_correlation
+  ),
+  residual_correlations_ge_0_10 = sum(
+    cfa_residual_correlations$
+      flagged_ge_0_10
+  ),
+  interpretation = paste(
+    "A substantial general PHQ-9 factor was supported by",
+    "consistently strong item loadings. However, the",
+    "prespecified one-factor ordinal CFA showed notable global",
+    "misfit, indicating that a single factor did not fully",
+    "reproduce the relationships among the nine items. The",
+    "evidence was therefore classified as mixed rather than as",
+    "proof of strict unidimensionality. Development-sample",
+    "multifactor solutions did not provide a stable,",
+    "substantively coherent simple structure eligible for",
+    "confirmatory validation."
+  )
+)
+
+validation_analysis_boundaries <- tibble::tibble(
+  secondary_cfa_fitted = FALSE,
+  post_hoc_correlated_residuals_added = FALSE,
+  cfa_cross_loadings_added = FALSE,
+  items_deleted = FALSE,
+  bifactor_model_fitted = FALSE,
+  alternative_model_frozen_retrospectively = FALSE
+)
+
+# 28. Define the complete validated Stage 3 object -----------------------------
 
 stage3_split_object <- list(
   metadata = list(
@@ -1678,6 +2847,9 @@ stage3_split_object <- list(
       ),
       GPArotation = as.character(
         packageVersion("GPArotation")
+      ),
+      lavaan = as.character(
+        packageVersion("lavaan")
       )
     )
   ),
@@ -1767,10 +2939,83 @@ stage3_split_object <- list(
     validation_model = "one_factor_only",
     decision_date = "2026-07-24",
     recorded_before_validation_access = TRUE
+  ),
+  validation_cfa = list(
+    validation_data_checks = validation_data_checks,
+    category_counts = validation_category_counts,
+    model_syntax = one_factor_model,
+    fitted_model = cfa_fit,
+    fitting_warnings = cfa_warnings,
+    resolved_options = cfa_resolved_options,
+    resolved_option_checks = resolved_option_checks,
+    complete_test_information = (
+      cfa_test_information
+    ),
+    model_test_table = cfa_model_test_table,
+    complete_fit_measures = (
+      cfa_fit_measures_all
+    ),
+    requested_fit_measures = (
+      cfa_fit_measure_table
+    ),
+    complete_standardized_solution = (
+      cfa_standardized_all
+    ),
+    standardized_loadings = (
+      cfa_standardized_loadings
+    ),
+    loading_checks = cfa_loading_checks,
+    thresholds = cfa_thresholds,
+    threshold_order_checks = (
+      threshold_order_checks
+    ),
+    threshold_checks = cfa_threshold_checks,
+    complete_residual_object = cfa_residuals,
+    residual_summary = cfa_residual_summary,
+    observed_correlations = (
+      cfa_observed_correlations
+    ),
+    implied_correlations = (
+      cfa_implied_correlations
+    ),
+    residual_correlations = (
+      cfa_residual_correlations
+    ),
+    residual_checks = cfa_residual_checks,
+    residual_convention = (
+      "observed minus model-implied correlation"
+    ),
+    standardized_residual_variances = (
+      cfa_standardized_residual_variances
+    ),
+    residual_variance_summary = (
+      cfa_residual_variance_summary
+    ),
+    theta = cfa_theta,
+    latent_covariance = cfa_latent_covariance,
+    latent_factor_identification = (
+      "Factor variance fixed to 1 under std.lv = TRUE"
+    ),
+    variance_checks = cfa_variance_checks,
+    computational_diagnostics = (
+      cfa_computational_diagnostics
+    ),
+    conclusion = (
+      validation_dimensionality_conclusion
+    ),
+    analysis_boundaries = (
+      validation_analysis_boundaries
+    ),
+    validation_access = list(
+      validation_results_accessed = TRUE,
+      access_date = "2026-07-26",
+      primary_model_fitted = TRUE,
+      secondary_model_fitted = FALSE
+    )
   )
 )
 
-# 21. Save the validated Stage 3 outputs ---------------------------------------
+# 29. Save the complete validated Stage 3 outputs ------------------------------
 
 saveRDS(
   stage3_split_object,
