@@ -1,9 +1,9 @@
 # Analysis Plan
 
 **Repository:** `phq9-nhanes-psychometrics`
-**Analysis plan version:** 1.6
-**Last updated:** 24 July 2026
-**Current stage:** Stage 3 development-sample dimensionality analyses and the model-freezing decision are complete. No secondary multifactor CFA was frozen. The prespecified one-factor validation CFA has not yet been fitted.
+**Analysis plan version:** 1.7
+**Last updated:** 26 July 2026
+**Current stage:** The pre-specified Stage 3 development and validation analyses are complete. No secondary multifactor CFA was frozen or fitted. The validation-sample one-factor ordinal CFA produced mixed evidence: all nine items loaded strongly on a substantial general factor, but global fit indicated notable departure from a complete one-factor representation. Stage 3 output export, report integration and final repository review remain outstanding.
 
 ## 1. Project title
 
@@ -1192,14 +1192,16 @@ phq9-nhanes-psychometrics/
 - [x] Check the custom leading-consecutive recommendation against `parallel_results$nfact`.
 - [x] Conduct the permitted development-sample exploratory factor analyses.
 - [x] Record the alternative-model freezing decision before accessing validation results; no eligible alternative CFA was frozen.
-- [ ] Fit the prespecified one-factor ordinal CFA in the validation sample.
+- [x] Fit the prespecified one-factor ordinal CFA in the validation sample.
 - [x] Determine that no secondary multifactor CFA will be fitted because no candidate met the freezing criteria.
-- [ ] Extract robust global-fit measures.
-- [ ] Report fully standardised factor loadings with 95% Wald-type confidence intervals.
-- [ ] Extract and validate item thresholds.
-- [ ] Document estimator, parameterisation, convergence and improper-solution diagnostics.
-- [ ] Examine residual correlations using the descriptive absolute `.10` flag.
-- [ ] Avoid post hoc correlated residuals and item deletion.
+- [x] Extract and validate the prespecified robust global-fit measures.
+- [x] Report fully standardised factor loadings with 95% Wald-type confidence intervals.
+- [x] Extract and validate all item thresholds.
+- [x] Document the estimator, parameterisation, model-test correction, convergence and improper-solution diagnostics.
+- [x] Examine residual correlations using the descriptive absolute `.10` flag.
+- [x] Confirm that all standardised residual variances are finite, positive and within admissible bounds.
+- [x] Record the validation-stage dimensionality conclusion as mixed evidence.
+- [x] Avoid post hoc correlated residuals, cross-loadings, item deletion, bifactor modelling and retrospective alternative-model selection.
 - [ ] Export Stage 3 tables and figures.
 - [ ] Update the session-information record.
 - [ ] Update the Quarto report.
@@ -1208,4 +1210,8 @@ phq9-nhanes-psychometrics/
 
 Stage 2A and Stage 2B review and validation are complete.
 
-The Stage 3 dimensionality-analysis specification was locked before analysis on 23 July 2026. The fixed split, split validation, development polychoric matrix, ordinal parallel analysis, permitted EFAs and model-freezing decision are complete. No secondary multifactor CFA was frozen. The prespecified one-factor validation CFA has not yet been fitted.
+The Stage 3 dimensionality-analysis specification was locked before analysis on 23 July 2026. The fixed split, split validation, development polychoric matrix, ordinal parallel analysis, permitted EFAs, model-freezing decision and prespecified validation-sample one-factor ordinal CFA are complete. No secondary multifactor CFA was frozen or fitted.
+
+The validation CFA supported a substantial general PHQ-9 factor, with fully standardised loadings from `.707` to `.873`. However, global fit showed notable departure from the one-factor representation: robust CFI was `.924`, robust TLI was `.898`, robust RMSEA was `.127`, with a 90% confidence interval from `.114` to `.140`, and SRMR was `.048`. One residual correlation met the prespecified absolute `.10` descriptive flag. The Stage 3 dimensionality conclusion was therefore recorded as **mixed evidence**, rather than as establishing strict unidimensionality.
+
+Stage 3 table and figure export, session-information updating, Quarto integration, academic-voice review and final repository validation remain outstanding.
