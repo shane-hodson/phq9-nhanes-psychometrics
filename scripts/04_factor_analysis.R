@@ -9,10 +9,15 @@
 #   - estimate and validate the development-sample polychoric matrix
 #   - run the prespecified single-core ordinal parallel analysis
 #   - reconstruct and validate the 95th-percentile factor recommendation
-#   - save the recoverable split, polychoric and parallel-analysis objects
+#   - fit and validate the permitted development-sample EFA solutions
+#   - extract EFA loading, factor-correlation, residual and fit diagnostics
+#   - record the development-stage model-freezing decision
+#   - save the recoverable split, polychoric, parallel-analysis and EFA objects
 #
 # Parallel analysis supports three factors.
-# EFA and CFA are not yet run in this script.
+# Neither multifactor EFA satisfied the locked criteria for freezing a
+# secondary validation CFA.
+# No validation-sample CFA is run in the current implementation.
 # ==============================================================================
 
 # 1. Install any missing packages ----------------------------------------------
@@ -23,17 +28,17 @@ required_packages <- c(
   "readr",
   "here",
   "tibble",
-  "psych"
+  "psych",
+  "GPArotation"
 )
 
 missing_packages <- required_packages[
   !required_packages %in% rownames(installed.packages())
 ]
 
-if (length(missing_packages) > 0) {
+if (length(missing_packages) > 0L) {
   install.packages(missing_packages)
 }
-
 
 # 2. Load packages --------------------------------------------------------------
 
@@ -526,10 +531,15 @@ if (length(parallel_analysis_warnings) > 0L) {
 }
 
 if (!is.matrix(parallel_results$values)) {
-  stop("The parallel-analysis simulation results are not a matrix.")
+  stop(
+    "The parallel-analysis simulation results are not a matrix."
+  )
 }
 
-if (nrow(parallel_results$values) != parallel_analysis_iterations) {
+if (
+  nrow(parallel_results$values) !=
+  parallel_analysis_iterations
+) {
   stop(
     "The parallel-analysis simulation matrix has an unexpected ",
     "number of iterations."
@@ -680,7 +690,963 @@ parallel_analysis_diagnostics <- tibble(
   )
 )
 
-# 14. Define the validated Stage 3 split object --------------------------------
+if (parallel_custom_nfact != 3L) {
+  stop(
+    "The recorded Stage 3 model-freezing decision assumes that ",
+    "parallel analysis recommends three factors. The current ",
+    "recommendation is ",
+    parallel_custom_nfact,
+    ". Review the result before continuing."
+  )
+}
+
+# 14. Fit the permitted development-sample EFAs -------------------------------
+
+fit_development_efa <- function(
+    number_of_factors,
+    rotation_method
+) {
+  captured_warnings <- character()
+
+  fitted_model <- withCallingHandlers(
+    psych::fa(
+      r = development_poly_matrix,
+      nfactors = number_of_factors,
+      n.obs = expected_development_n,
+      rotate = rotation_method,
+      residuals = TRUE,
+      SMC = TRUE,
+      fm = "minres",
+      warnings = TRUE,
+      smooth = FALSE
+    ),
+    warning = function(warning_condition) {
+      captured_warnings <<- c(
+        captured_warnings,
+        conditionMessage(warning_condition)
+      )
+
+      invokeRestart("muffleWarning")
+    }
+  )
+
+  list(
+    model = fitted_model,
+    warnings = unique(captured_warnings)
+  )
+}
+
+efa_one_result <- fit_development_efa(
+  number_of_factors = 1L,
+  rotation_method = "none"
+)
+
+efa_two_result <- fit_development_efa(
+  number_of_factors = 2L,
+  rotation_method = "oblimin"
+)
+
+efa_three_result <- fit_development_efa(
+  number_of_factors = 3L,
+  rotation_method = "oblimin"
+)
+
+efa_models <- list(
+  one_factor = efa_one_result$model,
+  two_factor = efa_two_result$model,
+  three_factor = efa_three_result$model
+)
+
+efa_warnings <- list(
+  one_factor = efa_one_result$warnings,
+  two_factor = efa_two_result$warnings,
+  three_factor = efa_three_result$warnings
+)
+
+efa_expected_factors <- c(
+  one_factor = 1L,
+  two_factor = 2L,
+  three_factor = 3L
+)
+
+efa_rotations <- c(
+  one_factor = "none",
+  two_factor = "oblimin",
+  three_factor = "oblimin"
+)
+
+# 15. Validate the development-sample EFAs ------------------------------------
+
+validate_development_efa <- function(
+    efa_result,
+    solution_name,
+    expected_factors,
+    captured_warnings
+) {
+  loading_matrix <- unclass(
+    efa_result$loadings
+  )
+
+  communality_values <- as.numeric(
+    efa_result$communality
+  )
+
+  uniqueness_values <- as.numeric(
+    efa_result$uniquenesses
+  )
+
+  complexity_values <- as.numeric(
+    efa_result$complexity
+  )
+
+  expected_loading_dimensions <- c(
+    length(phq9_items),
+    expected_factors
+  )
+
+  if (length(captured_warnings) > 0L) {
+    stop(
+      "The ",
+      solution_name,
+      " EFA produced one or more warnings: ",
+      paste(captured_warnings, collapse = " | ")
+    )
+  }
+
+  if (
+    !identical(
+      dim(loading_matrix),
+      expected_loading_dimensions
+    )
+  ) {
+    stop(
+      "The ",
+      solution_name,
+      " loading matrix has unexpected dimensions."
+    )
+  }
+
+  if (
+    !identical(
+      rownames(loading_matrix),
+      phq9_items
+    )
+  ) {
+    stop(
+      "The ",
+      solution_name,
+      " loading matrix has an unexpected item order."
+    )
+  }
+
+  if (!all(is.finite(loading_matrix))) {
+    stop(
+      "The ",
+      solution_name,
+      " loading matrix contains a non-finite estimate."
+    )
+  }
+
+  if (
+    length(communality_values) !=
+    length(phq9_items) ||
+    !all(is.finite(communality_values))
+  ) {
+    stop(
+      "The ",
+      solution_name,
+      " communalities are invalid."
+    )
+  }
+
+  if (
+    length(uniqueness_values) !=
+    length(phq9_items) ||
+    !all(is.finite(uniqueness_values))
+  ) {
+    stop(
+      "The ",
+      solution_name,
+      " uniquenesses are invalid."
+    )
+  }
+
+  if (
+    length(complexity_values) !=
+    length(phq9_items) ||
+    !all(is.finite(complexity_values))
+  ) {
+    stop(
+      "The ",
+      solution_name,
+      " item-complexity values are invalid."
+    )
+  }
+
+  if (
+    any(communality_values < 0) ||
+    any(communality_values >= 1)
+  ) {
+    stop(
+      "The ",
+      solution_name,
+      " EFA contains an inadmissible communality."
+    )
+  }
+
+  if (
+    any(uniqueness_values <= 0) ||
+    any(uniqueness_values > 1)
+  ) {
+    stop(
+      "The ",
+      solution_name,
+      " EFA contains an inadmissible uniqueness."
+    )
+  }
+
+  expected_correlation_dimensions <- c(
+    length(phq9_items),
+    length(phq9_items)
+  )
+
+  if (
+    !identical(
+      dim(efa_result$model),
+      expected_correlation_dimensions
+    ) ||
+    !identical(
+      dim(efa_result$residual),
+      expected_correlation_dimensions
+    )
+  ) {
+    stop(
+      "The ",
+      solution_name,
+      " reproduced or residual matrix has unexpected dimensions."
+    )
+  }
+
+  if (
+    !identical(
+      rownames(efa_result$model),
+      phq9_items
+    ) ||
+    !identical(
+      colnames(efa_result$model),
+      phq9_items
+    ) ||
+    !identical(
+      rownames(efa_result$residual),
+      phq9_items
+    ) ||
+    !identical(
+      colnames(efa_result$residual),
+      phq9_items
+    )
+  ) {
+    stop(
+      "The ",
+      solution_name,
+      " reproduced or residual matrix has unexpected item names."
+    )
+  }
+
+  if (
+    !all(is.finite(efa_result$model)) ||
+    !all(is.finite(efa_result$residual))
+  ) {
+    stop(
+      "The ",
+      solution_name,
+      " reproduced or residual matrix contains a non-finite value."
+    )
+  }
+
+  if (
+    max(
+      abs(
+        efa_result$model -
+        t(efa_result$model)
+      )
+    ) > 1e-12
+  ) {
+    stop(
+      "The ",
+      solution_name,
+      " reproduced correlation matrix is not symmetric."
+    )
+  }
+
+  if (
+    max(
+      abs(
+        efa_result$residual -
+        t(efa_result$residual)
+      )
+    ) > 1e-12
+  ) {
+    stop(
+      "The ",
+      solution_name,
+      " residual correlation matrix is not symmetric."
+    )
+  }
+
+  reconstruction_difference <- max(
+    abs(
+      development_poly_matrix -
+        efa_result$model -
+        efa_result$residual
+    )
+  )
+
+  if (reconstruction_difference > 1e-10) {
+    stop(
+      "The ",
+      solution_name,
+      " reproduced and residual matrices do not reconstruct ",
+      "the development polychoric matrix within tolerance."
+    )
+  }
+
+  required_scalar_components <- c(
+    statistic = efa_result$STATISTIC,
+    p_value = efa_result$PVAL,
+    degrees_of_freedom = efa_result$dof,
+    rmsr = efa_result$rms,
+    tli = efa_result$TLI
+  )
+
+  if (
+    length(required_scalar_components) != 5L ||
+    !all(is.finite(required_scalar_components))
+  ) {
+    stop(
+      "The ",
+      solution_name,
+      " EFA has an invalid required fit statistic."
+    )
+  }
+
+  required_rmsea_names <- c(
+    "RMSEA",
+    "lower",
+    "upper",
+    "confidence"
+  )
+
+  if (
+    !all(
+      required_rmsea_names %in%
+      names(efa_result$RMSEA)
+    ) ||
+    !all(
+      is.finite(
+        efa_result$RMSEA[
+          required_rmsea_names
+        ]
+      )
+    )
+  ) {
+    stop(
+      "The ",
+      solution_name,
+      " EFA has invalid RMSEA information."
+    )
+  }
+
+  objective_value <- unname(
+    efa_result$criteria["objective"]
+  )
+
+  if (
+    length(objective_value) != 1L ||
+    !is.finite(objective_value)
+  ) {
+    stop(
+      "The ",
+      solution_name,
+      " EFA has an invalid objective value."
+    )
+  }
+
+  if (expected_factors > 1L) {
+    factor_correlations <- efa_result$Phi
+
+    expected_factor_dimensions <- c(
+      expected_factors,
+      expected_factors
+    )
+
+    if (
+      !identical(
+        dim(factor_correlations),
+        expected_factor_dimensions
+      )
+    ) {
+      stop(
+        "The ",
+        solution_name,
+        " factor-correlation matrix has unexpected dimensions."
+      )
+    }
+
+    if (!all(is.finite(factor_correlations))) {
+      stop(
+        "The ",
+        solution_name,
+        " factor-correlation matrix contains a non-finite value."
+      )
+    }
+
+    if (
+      max(
+        abs(
+          factor_correlations -
+          t(factor_correlations)
+        )
+      ) > 1e-12
+    ) {
+      stop(
+        "The ",
+        solution_name,
+        " factor-correlation matrix is not symmetric."
+      )
+    }
+
+    if (
+      max(
+        abs(
+          diag(factor_correlations) - 1
+        )
+      ) > 1e-12
+    ) {
+      stop(
+        "The ",
+        solution_name,
+        " factor-correlation matrix does not have a unit diagonal."
+      )
+    }
+
+    factor_correlation_tolerance <- 1e-12
+
+    if (
+      any(
+        factor_correlations < (-1 - factor_correlation_tolerance) |
+        factor_correlations > (1 + factor_correlation_tolerance)
+      )
+    ) {
+      stop(
+        "The ",
+        solution_name,
+        " factor-correlation matrix contains a correlation outside ",
+        "the valid range beyond numerical tolerance."
+      )
+    }
+
+    factor_correlation_eigenvalues <- eigen(
+      factor_correlations,
+      symmetric = TRUE,
+      only.values = TRUE
+    )$values
+
+    if (
+      min(factor_correlation_eigenvalues) <= 0
+    ) {
+      stop(
+        "The ",
+        solution_name,
+        " factor-correlation matrix is not positive definite."
+      )
+    }
+  }
+
+  invisible(TRUE)
+}
+
+for (solution_name in names(efa_models)) {
+  validate_development_efa(
+    efa_result = efa_models[[solution_name]],
+    solution_name = solution_name,
+    expected_factors = (
+      efa_expected_factors[[solution_name]]
+    ),
+    captured_warnings = efa_warnings[[solution_name]]
+  )
+}
+
+# 16. Extract EFA loadings and item diagnostics --------------------------------
+
+efa_loading_table <- dplyr::bind_rows(
+  lapply(
+    names(efa_models),
+    function(solution_name) {
+      efa_result <- efa_models[[solution_name]]
+      pattern_matrix <- unclass(
+        efa_result$loadings
+      )
+
+      dplyr::bind_rows(
+        lapply(
+          seq_len(ncol(pattern_matrix)),
+          function(factor_index) {
+            tibble::tibble(
+              solution = solution_name,
+              factors = (
+                efa_expected_factors[[solution_name]]
+              ),
+              rotation = efa_rotations[[solution_name]],
+              item = rownames(pattern_matrix),
+              factor = colnames(pattern_matrix)[
+                factor_index
+              ],
+              loading = as.numeric(
+                pattern_matrix[, factor_index]
+              ),
+              communality = as.numeric(
+                efa_result$communality
+              ),
+              uniqueness = as.numeric(
+                efa_result$uniquenesses
+              ),
+              complexity = as.numeric(
+                efa_result$complexity
+              )
+            )
+          }
+        )
+      )
+    }
+  )
+)
+
+efa_loading_separation <- dplyr::bind_rows(
+  lapply(
+    names(efa_models),
+    function(solution_name) {
+      efa_result <- efa_models[[solution_name]]
+      pattern_matrix <- unclass(
+        efa_result$loadings
+      )
+
+      dplyr::bind_rows(
+        lapply(
+          seq_len(nrow(pattern_matrix)),
+          function(item_index) {
+            item_loadings <- pattern_matrix[
+              item_index,
+              ,
+              drop = TRUE
+            ]
+
+            absolute_loadings <- abs(
+              item_loadings
+            )
+
+            loading_order <- order(
+              absolute_loadings,
+              decreasing = TRUE
+            )
+
+            primary_index <- loading_order[1]
+
+            secondary_loading <- NA_real_
+            absolute_loading_gap <- NA_real_
+
+            if (length(loading_order) > 1L) {
+              secondary_index <- loading_order[2]
+
+              secondary_loading <- item_loadings[
+                secondary_index
+              ]
+
+              absolute_loading_gap <- (
+                absolute_loadings[primary_index] -
+                  absolute_loadings[secondary_index]
+              )
+            }
+
+            tibble::tibble(
+              solution = solution_name,
+              factors = (
+                efa_expected_factors[[solution_name]]
+              ),
+              item = rownames(pattern_matrix)[
+                item_index
+              ],
+              primary_factor = colnames(pattern_matrix)[
+                primary_index
+              ],
+              primary_loading = item_loadings[
+                primary_index
+              ],
+              secondary_loading = secondary_loading,
+              absolute_loading_gap = absolute_loading_gap,
+              primary_loading_below_0_40 = (
+                absolute_loadings[primary_index] < 0.40
+              ),
+              cross_loading_ge_0_30 = (
+                !is.na(secondary_loading) &&
+                  abs(secondary_loading) >= 0.30
+              ),
+              loading_gap_below_0_20 = (
+                !is.na(absolute_loading_gap) &&
+                  absolute_loading_gap < 0.20
+              ),
+              complexity = as.numeric(
+                efa_result$complexity[item_index]
+              )
+            )
+          }
+        )
+      )
+    }
+  )
+)
+
+# 17. Extract EFA correlations and diagnostics ---------------------------------
+
+extract_lower_triangle <- function(
+    correlation_matrix,
+    solution_name,
+    value_name
+) {
+  matrix_indices <- which(
+    lower.tri(correlation_matrix),
+    arr.ind = TRUE
+  )
+
+  output <- tibble::tibble(
+    solution = solution_name,
+    variable_1 = rownames(correlation_matrix)[
+      matrix_indices[, 1]
+    ],
+    variable_2 = colnames(correlation_matrix)[
+      matrix_indices[, 2]
+    ],
+    value = as.numeric(
+      correlation_matrix[matrix_indices]
+    )
+  )
+
+  names(output)[names(output) == "value"] <- value_name
+
+  output
+}
+
+efa_factor_correlations <- dplyr::bind_rows(
+  lapply(
+    names(efa_models),
+    function(solution_name) {
+      efa_result <- efa_models[[solution_name]]
+
+      if (
+        efa_expected_factors[[solution_name]] == 1L
+      ) {
+        return(
+          tibble::tibble(
+            solution = character(),
+            factor_1 = character(),
+            factor_2 = character(),
+            correlation = numeric()
+          )
+        )
+      }
+
+      matrix_indices <- which(
+        lower.tri(efa_result$Phi),
+        arr.ind = TRUE
+      )
+
+      tibble::tibble(
+        solution = solution_name,
+        factor_1 = rownames(efa_result$Phi)[
+          matrix_indices[, 1]
+        ],
+        factor_2 = colnames(efa_result$Phi)[
+          matrix_indices[, 2]
+        ],
+        correlation = as.numeric(
+          efa_result$Phi[matrix_indices]
+        )
+      )
+    }
+  )
+)
+
+efa_reproduced_correlations <- dplyr::bind_rows(
+  lapply(
+    names(efa_models),
+    function(solution_name) {
+      extract_lower_triangle(
+        correlation_matrix = (
+          efa_models[[solution_name]]$model
+        ),
+        solution_name = solution_name,
+        value_name = "reproduced_correlation"
+      )
+    }
+  )
+)
+
+efa_residual_correlations <- dplyr::bind_rows(
+  lapply(
+    names(efa_models),
+    function(solution_name) {
+      extract_lower_triangle(
+        correlation_matrix = (
+          efa_models[[solution_name]]$residual
+        ),
+        solution_name = solution_name,
+        value_name = "residual_correlation"
+      )
+    }
+  )
+)
+
+efa_model_diagnostics <- dplyr::bind_rows(
+  lapply(
+    names(efa_models),
+    function(solution_name) {
+      efa_result <- efa_models[[solution_name]]
+
+      residual_off_diagonal <- efa_result$residual[
+        lower.tri(efa_result$residual)
+      ]
+
+      maximum_absolute_factor_correlation <- NA_real_
+
+      if (
+        efa_expected_factors[[solution_name]] > 1L
+      ) {
+        maximum_absolute_factor_correlation <- max(
+          abs(
+            efa_result$Phi[
+              lower.tri(efa_result$Phi)
+            ]
+          )
+        )
+      }
+
+      tibble::tibble(
+        solution = solution_name,
+        factors = efa_expected_factors[[solution_name]],
+        rotation = efa_rotations[[solution_name]],
+        sample_n = expected_development_n,
+        warning_n = length(
+          efa_warnings[[solution_name]]
+        ),
+        minimum_communality = min(
+          efa_result$communality
+        ),
+        maximum_communality = max(
+          efa_result$communality
+        ),
+        minimum_uniqueness = min(
+          efa_result$uniquenesses
+        ),
+        maximum_uniqueness = max(
+          efa_result$uniquenesses
+        ),
+        maximum_complexity = max(
+          efa_result$complexity
+        ),
+        largest_absolute_residual = max(
+          abs(residual_off_diagonal)
+        ),
+        residual_correlations_ge_0_10 = sum(
+          abs(residual_off_diagonal) >= 0.10
+        ),
+        chi_square = unname(
+          efa_result$STATISTIC
+        ),
+        degrees_of_freedom = unname(
+          efa_result$dof
+        ),
+        p_value = unname(
+          efa_result$PVAL
+        ),
+        rmsr = unname(
+          efa_result$rms
+        ),
+        rmsea = unname(
+          efa_result$RMSEA["RMSEA"]
+        ),
+        rmsea_lower = unname(
+          efa_result$RMSEA["lower"]
+        ),
+        rmsea_upper = unname(
+          efa_result$RMSEA["upper"]
+        ),
+        rmsea_confidence = unname(
+          efa_result$RMSEA["confidence"]
+        ),
+        tli = unname(
+          efa_result$TLI
+        ),
+        maximum_absolute_factor_correlation = (
+          maximum_absolute_factor_correlation
+        ),
+        objective = unname(
+          efa_result$criteria["objective"]
+        ),
+        computational_checks_passed = TRUE
+      )
+    }
+  )
+)
+
+# 18. Record the development-stage model-freezing decision ---------------------
+
+two_factor_decision_evidence <- efa_loading_separation |>
+  filter(
+    solution == "two_factor",
+    item %in% c(
+      "DPQ010",
+      "DPQ070",
+      "DPQ080"
+    )
+  )
+
+required_two_factor_flagged_items <- c(
+  "DPQ010",
+  "DPQ070",
+  "DPQ080"
+)
+
+observed_two_factor_flagged_items <- (
+  two_factor_decision_evidence |>
+    filter(
+      cross_loading_ge_0_30,
+      loading_gap_below_0_20
+    ) |>
+    pull(item)
+)
+
+if (
+  !all(
+    required_two_factor_flagged_items %in%
+    observed_two_factor_flagged_items
+  )
+) {
+  stop(
+    "The recorded two-factor model-freezing decision is no ",
+    "longer supported by the expected cross-loading and loading-",
+    "separation evidence."
+  )
+}
+
+three_factor_primary_assignments <- (
+  efa_loading_separation |>
+    filter(solution == "three_factor")
+)
+
+three_factor_names <- colnames(
+  unclass(
+    efa_models$three_factor$loadings
+  )
+)
+
+three_factor_primary_counts <- tibble::tibble(
+  factor = three_factor_names,
+  primary_indicator_n = as.integer(
+    table(
+      factor(
+        three_factor_primary_assignments$primary_factor,
+        levels = three_factor_names
+      )
+    )
+  )
+)
+
+if (
+  min(
+    three_factor_primary_counts$primary_indicator_n
+  ) >= 3L
+) {
+  stop(
+    "The recorded three-factor model-freezing decision is no ",
+    "longer supported because every factor now has at least ",
+    "three primary indicators."
+  )
+}
+
+development_model_decision <- tibble::tibble(
+  candidate_solution = c(
+    "two_factor",
+    "three_factor"
+  ),
+  factor_count = c(2L, 3L),
+  supported_by_parallel_analysis = c(
+    parallel_custom_nfact >= 2L,
+    parallel_custom_nfact >= 3L
+  ),
+  retained_for_validation = c(
+    FALSE,
+    FALSE
+  ),
+  decision_date = c(
+    "2026-07-24",
+    "2026-07-24"
+  ),
+  decision_reason = c(
+    paste(
+      "Not frozen because DPQ010, DPQ070 and DPQ080 showed",
+      "cross-loadings of at least .30 and primary-versus-",
+      "secondary loading gaps below .20. The factors also",
+      "correlated strongly, and the pattern did not support",
+      "a sufficiently stable or substantively distinct",
+      "simple-structure CFA allocation."
+    ),
+    paste(
+      "Not frozen because one factor was primarily defined by",
+      "only two clear indicators, failing the requirement that",
+      "every frozen factor contain at least three substantively",
+      "coherent indicators. The factors were also highly",
+      "correlated."
+    )
+  )
+)
+
+validation_model_plan <- tibble::tibble(
+  primary_validation_model = "one_factor",
+  secondary_model_frozen = FALSE,
+  secondary_validation_model = NA_character_,
+  decision_date = "2026-07-24",
+  decision_recorded_before_validation_access = TRUE,
+  validation_sample_factor_results_accessed = FALSE
+)
+
+# 19. Calculate the PHQ-9 total-score distribution -----------------------------
+
+phq9_total_distribution <- phq9_stage3_split |>
+  mutate(
+    phq9_total = rowSums(
+      pick(all_of(phq9_items))
+    )
+  ) |>
+  count(
+    stage3_sample,
+    phq9_total,
+    name = "frequency"
+  ) |>
+  complete(
+    stage3_sample,
+    phq9_total = 0:27,
+    fill = list(frequency = 0L)
+  ) |>
+  group_by(stage3_sample) |>
+  mutate(
+    percentage = 100 * frequency / sum(frequency)
+  ) |>
+  ungroup() |>
+  arrange(
+    stage3_sample,
+    phq9_total
+  )
+
+# 20. Define the validated Stage 3 object --------------------------------------
 
 stage3_split_object <- list(
   metadata = list(
@@ -692,18 +1658,34 @@ stage3_split_object <- list(
     phq9_items = phq9_items,
     r_version = R.version.string,
     package_versions = c(
-      dplyr = as.character(packageVersion("dplyr")),
-      tidyr = as.character(packageVersion("tidyr")),
-      readr = as.character(packageVersion("readr")),
-      here = as.character(packageVersion("here")),
-      tibble = as.character(packageVersion("tibble")),
-      psych = as.character(packageVersion("psych"))
+      dplyr = as.character(
+        packageVersion("dplyr")
+      ),
+      tidyr = as.character(
+        packageVersion("tidyr")
+      ),
+      readr = as.character(
+        packageVersion("readr")
+      ),
+      here = as.character(
+        packageVersion("here")
+      ),
+      tibble = as.character(
+        packageVersion("tibble")
+      ),
+      psych = as.character(
+        packageVersion("psych")
+      ),
+      GPArotation = as.character(
+        packageVersion("GPArotation")
+      )
     )
   ),
   data = phq9_stage3_split,
   split_summary = split_summary,
   item_category_frequencies = item_category_frequencies,
   item_floor_summary = item_floor_summary,
+  phq9_total_distribution = phq9_total_distribution,
   development_polychoric = list(
     correlation_matrix = development_poly_matrix,
     thresholds = development_poly_thresholds,
@@ -718,7 +1700,9 @@ stage3_split_object <- list(
     )
   ),
   development_parallel_analysis = list(
-    observed_factor_eigenvalues = parallel_observed_eigenvalues,
+    observed_factor_eigenvalues = (
+      parallel_observed_eigenvalues
+    ),
     simulated_factor_eigenvalues = (
       parallel_simulated_factor_eigenvalues
     ),
@@ -743,27 +1727,50 @@ stage3_split_object <- list(
       plot = FALSE,
       mc_cores = 1L
     )
+  ),
+  development_efa = list(
+    models = efa_models,
+    warnings = efa_warnings,
+    loadings = efa_loading_table,
+    loading_separation = efa_loading_separation,
+    factor_correlations = efa_factor_correlations,
+    reproduced_correlations = (
+      efa_reproduced_correlations
+    ),
+    residual_correlations = (
+      efa_residual_correlations
+    ),
+    diagnostics = efa_model_diagnostics,
+    three_factor_primary_counts = (
+      three_factor_primary_counts
+    ),
+    two_factor_decision_evidence = (
+      two_factor_decision_evidence
+    ),
+    estimation_settings = list(
+      correlation_matrix = (
+        "explicit development polychoric matrix"
+      ),
+      sample_n = expected_development_n,
+      fm = "minres",
+      SMC = TRUE,
+      smooth = FALSE,
+      residuals = TRUE,
+      one_factor_rotation = "none",
+      multifactor_rotation = "oblimin"
+    )
+  ),
+  development_model_freezing_decision = list(
+    candidate_assessment = development_model_decision,
+    validation_model_plan = validation_model_plan,
+    secondary_model_frozen = FALSE,
+    validation_model = "one_factor_only",
+    decision_date = "2026-07-24",
+    recorded_before_validation_access = TRUE
   )
 )
 
-# 15. Calculate PHQ-9 total-score distribution --------------------------------
-
-phq9_total_distribution <- phq9_stage3_split |>
-  mutate(phq9_total = rowSums(pick(all_of(phq9_items)))) |>
-  count(stage3_sample, phq9_total, name = "frequency") |>
-  complete(
-    stage3_sample,
-    phq9_total = 0:27,
-    fill = list(frequency = 0L)
-  ) |>
-  group_by(stage3_sample) |>
-  mutate(percentage = 100 * frequency / sum(frequency)) |>
-  ungroup() |>
-  arrange(stage3_sample, phq9_total)
-
-stage3_split_object$phq9_total_distribution <- phq9_total_distribution
-
-# 16. Save validated Stage 3 outputs -------------------------------------------
+# 21. Save the validated Stage 3 outputs ---------------------------------------
 
 saveRDS(
   stage3_split_object,
